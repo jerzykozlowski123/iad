@@ -5,4 +5,3 @@ openai
 pydantic
 pdfkit
 markdown2
--r install_wkhtmltopdf.sh
