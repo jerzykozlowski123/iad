@@ -111,6 +111,7 @@ def generate_decision_tree(answer):
     return {"nodes": summary, "options": options}
 
 def save_report_as_pdf(markdown_content, file_name="./tmp/raport.pdf"):
+    config = pdfkit.configuration(wkhtmltopdf="./wkhtmltopdf/bin/wkhtmltopdf.exe")
     html_data = markdown2.markdown(markdown_content)
     html_content = f"""
     <html>
@@ -128,7 +129,7 @@ def save_report_as_pdf(markdown_content, file_name="./tmp/raport.pdf"):
     </body>
     </html>
     """
-    pdfkit.from_string(html_content, file_name)    
+    pdfkit.from_string(html_content, file_name, configuration=config)    
     return file_name
 
 def download_button(file_path, button_text="Pobierz raport jako PDF"):
