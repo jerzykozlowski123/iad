@@ -19,7 +19,7 @@ session_token_limit = 15_000
 
 # Na serwer Digital Ocean
 load_dotenv()
-penai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 # lokalnie
 # env = dotenv_values(".env")
