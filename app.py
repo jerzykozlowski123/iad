@@ -4,14 +4,8 @@ from langfuse.decorators import observe
 from langfuse.openai import OpenAI
 from pydantic import BaseModel
 import streamlit.components.v1 as components
-import markdown2
-from reportlab.lib.pagesizes import A4
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.enums import TA_CENTER
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, ListFlowable, ListItem
-import mistune
-import base64
 import os
+
 
 st.set_page_config(page_title="IAD", layout="centered", menu_items={'About': 'IAD by JK'})
 st.title("Inteligentny Asystent Decyzyjny")
@@ -24,12 +18,12 @@ MODEL = "gpt-4o-mini"
 session_token_limit = 15_000
 
 # Na serwer Digital Ocean
-# load_dotenv()
-# openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+load_dotenv()
+penai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 # lokalnie
-env = dotenv_values(".env")
-openai_client = OpenAI(api_key=env["OPENAI_API_KEY"])
+# env = dotenv_values(".env")
+# openai_client = OpenAI(api_key=env["OPENAI_API_KEY"])
 
 def check_token_limit():
     if st.session_state['total_tokens_used'] >= session_token_limit:
@@ -113,66 +107,6 @@ def generate_decision_tree(answer):
     summary = parsed_content.summary
     options = [{"option": f"option {i+1}", "result": option} for i, option in enumerate(parsed_content.options)]
     return {"nodes": summary, "options": options}
-
-
-def save_report_as_pdf(markdown_text, output_path="./tmp/raport.pdf"):
-    doc = SimpleDocTemplate(output_path, pagesize=A4)
-    styles = getSampleStyleSheet()
-
-    # Style
-    title_style = ParagraphStyle('Title', parent=styles['Title'], fontSize=18, spaceAfter=10, alignment=TA_CENTER)
-    bold_style = ParagraphStyle('Bold', parent=styles['Normal'], fontSize=14, spaceAfter=5, fontName='Helvetica-Bold')
-    normal_style = styles['Normal']
-
-    elements = []
-    markdown = mistune.create_markdown(renderer='ast')
-
-    def process_markdown(md_ast):
-        """ Przetwarza AST Markdown i dodaje elementy do PDF. """
-        for node in md_ast:
-            if node['type'] == 'heading':
-                level = node['attrs']['level']
-                text = extract_text(node['children'])
-                style = title_style if level == 1 else bold_style
-                elements.append(Paragraph(text, style))
-                elements.append(Spacer(1, 10))
-
-            elif node['type'] == 'paragraph':
-                text = extract_text(node['children'])
-                elements.append(Paragraph(text, normal_style))
-                elements.append(Spacer(1, 5))
-
-            elif node['type'] == 'list':
-                list_items = [ListItem(Paragraph(extract_text(item['children']), normal_style)) for item in node['children']]
-                elements.append(ListFlowable(list_items, bulletType='bullet' if node['attrs']['ordered'] == False else '1'))
-                elements.append(Spacer(1, 5))
-
-    def extract_text(children):
-        """ Konwertuje dzieci AST na czysty tekst, obsługując także pogrubienia. """
-        text_parts = []
-        for child in children:
-            if 'raw' in child:
-                text_parts.append(child['raw'])  # Używamy `raw`, bo `text` nie istnieje
-            elif 'children' in child:
-                text_parts.append(extract_text(child['children']))  # Rekurencyjnie przechodzenie po strukturze
-        return ' '.join(text_parts)
-
-    md_ast = markdown(markdown_text)
-    process_markdown(md_ast)
-
-    if not elements:
-        raise ValueError("⚠️ PDF jest pusty! Sprawdź, czy Markdown nie jest błędny.")
-
-    # Tworzymy PDF z zachowaniem polskich znaków
-    doc.build(elements, canvasmaker=None)
-    return output_path
-
-def download_button(file_path, button_text="Pobierz raport jako PDF"):
-    with open(file_path, "rb") as file:
-        pdf_data = file.read()
-    b64 = base64.b64encode(pdf_data).decode()
-    href = f'<a href="data:application/octet-stream;base64,{b64}" download="{file_path}">{button_text}</a>'
-    st.markdown(href, unsafe_allow_html=True)
 
 with st.sidebar:
     c1, c2, c3 = st.columns([1,2,1])
@@ -291,8 +225,8 @@ if st.button("Generuj Raport", use_container_width=True):
         report_content = report["content"].choices[0].message.content
         st.subheader("Twój raport:")
         st.markdown(report_content)
-        pdf_path = save_report_as_pdf(report_content)
-        download_button(pdf_path)
+        # pdf_path = save_report_as_pdf(report_content)
+        # download_button(pdf_path)
     else:
         st.warning("Nie wygenerowano poprawnego drzewa decyzyjnego. Spróbuj jeszcze raz.")
 
