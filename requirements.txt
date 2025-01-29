@@ -3,5 +3,3 @@ python-dotenv
 langfuse
 openai
 pydantic
-pdfkit
-markdown2
