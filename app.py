@@ -1,10 +1,11 @@
 import streamlit as st
-from dotenv import dotenv_values, load_dotenv
+from dotenv import load_dotenv
 from langfuse.decorators import observe
 from langfuse.openai import OpenAI
 from pydantic import BaseModel
 import streamlit.components.v1 as components
 import os
+import time
 
 
 st.set_page_config(page_title="IAD", layout="centered", menu_items={'About': 'IAD by JK'})
@@ -15,24 +16,32 @@ class ResponseModel(BaseModel):
     options: list[str]
 
 MODEL = "gpt-4o-mini"
-session_token_limit = 15_000
+session_token_limit = 25_000
+session_token_limit_and_report = 27_000
 
-# Na serwer Digital Ocean
 load_dotenv()
 openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# lokalnie
-# env = dotenv_values(".env")
-# openai_client = OpenAI(api_key=env["OPENAI_API_KEY"])
-
 def check_token_limit():
     if st.session_state['total_tokens_used'] >= session_token_limit:
+        st.error("Limit tokenów został osiągnięty.")
+        st.success("Możesz jeszcze wygenerować raport. Naciśnij Generuj Raport.")
+        st.session_state["buttons_status"] = True
+        time.sleep(2)
+        return st.session_state["buttons_status"]
+    else:
+        st.session_state["buttons_status"] = False
+        return st.session_state["buttons_status"]
+
+def check_token_limit_for_report():
+    if st.session_state['total_tokens_used'] >= session_token_limit_and_report:
         st.error("Limit tokenów został osiągnięty. Aplikacja została zatrzymana.")
         st.stop()
 
 @observe(name="iad-steps") 
 def generate_next_steps(text, previous_step=""):
     check_token_limit()
+    check_token_limit_for_report()
     messages = [
         {
             'role': 'system',
@@ -42,10 +51,10 @@ def generate_next_steps(text, previous_step=""):
             W załączeniu masz opisany problem i wcześniej wybrane opcje. Użytkownik poda tobie wybraną opcję, którą rozwiń w tej odpowiedzi. 
             Nie wracaj do poprzednich, niewybranych opcji.
             Jeśli nie ma wcześniej wybranej opcji, to od razu przedstaw rozwiązania z uzasadnieniem.
-            Twoja odpowiedź powinna rozpoczynać się krótkim podsumowaniem problemu, a następnie zawierać porady w punktach. 
+            Twoja odpowiedź musi rozpoczynać się krótkim podsumowaniem problemu użytkownika, a następnie zawierać porady w punktach. 
             Nie dodawaj żadnych komentarzy ani próśb na końcu odpowiedzi.
             Przykład odpowiedzi: 
-            Podsumowanie problemu.
+            Opisowe podsumowanie problemu.
             1. Opis pierwszej porady.
             2. Opis drugiej porady. 
             
@@ -62,20 +71,18 @@ def generate_next_steps(text, previous_step=""):
     )
     usage = response.usage.total_tokens
     st.session_state['total_tokens_used'] += usage
-    return {
-        "content": response,
-    }
+    return {"content": response}
 
 @observe(name="iad-report") 
 def generate_report(problem, steps, options):
-    check_token_limit()
+    check_token_limit_for_report()
     messages = [
         {
             'role': 'system',
             'content': f"""
             Jesteś asystentem, który pomaga podejmować decyzje. 
             Napisz raport dotyczący zdefiniowanego przez użytkownika problemu.
-            Wykożystaj w nim wszystkie podjęte kroki podczas podejmowania decyzji. 
+            Wykorzystaj w nim wszystkie podjęte kroki podczas podejmowania decyzji. 
             I rozwiń porady zawarte w ostatnich opcjach.
             W załączeniu masz opisany problem i kroki dojścia do ostatecznych wniosków.  
             Raport nie powinien być dłuższy niż około 2500 znaków.
@@ -95,9 +102,7 @@ Ostatnie opcje: {options}
     )
     usage = response.usage.total_tokens
     st.session_state['total_tokens_used'] += usage
-    return {
-        "content": response,
-    }
+    return {"content": response}
 
 # Funkcja do generowania drzewa decyzyjnego
 def generate_decision_tree(answer):
@@ -159,61 +164,71 @@ if 'total_tokens_used' not in st.session_state:
 if "current_tree" not in st.session_state:
     st.session_state["current_tree"] = []
 if "selected_option" not in st.session_state:
-    st.session_state["selected_option"] = None
+    st.session_state["selected_option"] = []
 if "tree" not in st.session_state:
     st.session_state["tree"] = None
 if "previous_steps" not in st.session_state:
     st.session_state["previous_steps"] = []
+if 'selected_option_changed' not in st.session_state:
+    st.session_state.selected_option_changed = False  
+if "buttons_status" not in st.session_state:
+    st.session_state["buttons_status"] = False
 
-if st.button("Generuj Poradę", use_container_width=True):
+if st.button("Generuj Poradę", use_container_width=True, disabled=st.session_state["buttons_status"]):
     if text_entry.strip():
         summary = generate_next_steps(text_entry)
         tree = generate_decision_tree(summary)
         st.session_state["current_tree"].append(tree)
         st.session_state["tree"] = tree 
+        # Reset selected options to ensure checkboxes are not pre-selected
+        for idx in range(len(st.session_state["current_tree"])):
+            st.session_state[f"selected_options_{idx}"] = []
     else:
         st.warning("Proszę wprowadzić opis sytuacji!")
 
 for idx, node in enumerate(st.session_state["current_tree"]):
-    if f"selected_option_{idx}" not in st.session_state:
-        st.session_state[f"selected_option_{idx}"] = None
+    if f"selected_options_{idx}" not in st.session_state:
+        st.session_state[f"selected_options_{idx}"] = []
     st.subheader(f"Krok {idx+1}:")
-    st.markdown(f"""
-                > {node['nodes']} 
-                * * *
-                """)
+    st.markdown(f"> {node['nodes']} \n * * *")
+   
+    # Checkbox for selecting multiple options
+    updated_options = []  # Tymczasowa lista dla zaznaczonych opcji
     for idy, option in enumerate(node["options"]):
-        col1, col2 = st.columns([7,1])
-        with col1:
-            if option["option"] == st.session_state[f"selected_option_{idx}"]: 
-                st.markdown(f"**{option['result']}**")
-            else:
-                st.write(option["result"])
-        with col2:
-            button_key = f"button_{idx}_{idy}"
-            if st.button("Wybierz", key=button_key):
-                st.session_state[f"selected_option_{idx}"] = option["option"]
-                st.session_state["selected_option"] = option["result"]
-                st.session_state["previous_steps"] = st.session_state["current_tree"][:idx+1]
-                st.session_state["current_tree"] = st.session_state["current_tree"][:idx+1]
-                st.session_state["selected_option_changed"] = True
+        checkbox_key = f"option_{idx}_{idy}"
+        # Ensure checkboxes are not pre-selected
+        checkbox_value = option["result"] in st.session_state[f"selected_options_{idx}"]
+        checked = st.checkbox(option["result"], value=checkbox_value, key=checkbox_key)
+        if checked:
+            updated_options.append(option["result"]) 
+        st.session_state[f"selected_options_{idx}"] = updated_options
 
+    if st.button("Wybierz", key=f"select_button_{idx}", disabled=st.session_state["buttons_status"]):
+        st.session_state["previous_steps"] = st.session_state["current_tree"][:idx+1]
+        st.session_state["current_tree"] = st.session_state["current_tree"][:idx+1]
+        st.session_state["selected_option_changed"] = True
 
-if st.session_state["selected_option"]:
-    if st.session_state.get("selected_option_changed"):
-        
-        previous_step = st.session_state["previous_steps"][-1] if st.session_state["previous_steps"] else None 
-        summary = generate_next_steps(st.session_state["selected_option"], previous_step)
+    
+
+# Generating next steps after selection
+if st.session_state.selected_option_changed:
+    all_selected_options = [
+        option
+        for idx in range(len(st.session_state["current_tree"]))
+        for option in st.session_state[f"selected_options_{idx}"]
+    ]
+
+    if all_selected_options:
+        selected_option = " ".join(all_selected_options)  # Zbiera wszystkie zaznaczone opcje
+        previous_step = st.session_state["previous_steps"][-1] if st.session_state["previous_steps"] else None
+
+        summary = generate_next_steps(selected_option, previous_step)
         new_tree = generate_decision_tree(summary)
+
         st.session_state["current_tree"].append(new_tree)
         st.session_state["tree"] = new_tree
-        st.session_state["selected_option"] = None
         st.session_state["selected_option_changed"] = False
-    if len(st.session_state["current_tree"]) > len(st.session_state["previous_steps"]):
-        for i in range(len(st.session_state["previous_steps"]), len(st.session_state["current_tree"])):
-            st.session_state[f"selected_option_{i}"] = None
-
-    st.rerun()
+        st.rerun()
 
 if st.button("Generuj Raport", use_container_width=True):      
     if st.session_state["current_tree"]:
@@ -225,13 +240,13 @@ if st.button("Generuj Raport", use_container_width=True):
         report_content = report["content"].choices[0].message.content
         st.subheader("Twój raport:")
         st.markdown(report_content)
-        # pdf_path = save_report_as_pdf(report_content)
-        # download_button(pdf_path)
     else:
         st.warning("Nie wygenerowano poprawnego drzewa decyzyjnego. Spróbuj jeszcze raz.")
 
 if st.button("Resetuj Porady"):
     st.session_state["current_tree"] = []
-    st.session_state["selected_option"] = None
+    st.session_state["selected_option"] = []
     st.session_state["tree"] = None
-    st.success("Zresetowano wszystkie porady. Możesz zacząć od nowa.")
+    st.session_state["previous_steps"] = []
+    st.session_state.selected_option_changed = False
+    st.rerun()
