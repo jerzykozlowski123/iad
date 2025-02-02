@@ -98,7 +98,7 @@ Ostatnie opcje: {options}
     response = openai_client.chat.completions.create(
         model=MODEL,
         messages=messages,
-        temperature=0.7,
+        temperature=1,
     )
     usage = response.usage.total_tokens
     st.session_state['total_tokens_used'] += usage
@@ -198,7 +198,12 @@ for idx, node in enumerate(st.session_state["current_tree"]):
         checkbox_key = f"option_{idx}_{idy}"
         # Ensure checkboxes are not pre-selected
         checkbox_value = option["result"] in st.session_state[f"selected_options_{idx}"]
-        checked = st.checkbox(option["result"], value=checkbox_value, key=checkbox_key)
+        
+        col1, col2 = st.columns([1, 28])
+        with col1:
+            checked = st.checkbox(" ", value=checkbox_value, key=checkbox_key)
+        with col2:
+            st.markdown(f"{option['result']}")
         if checked:
             updated_options.append(option["result"]) 
         st.session_state[f"selected_options_{idx}"] = updated_options
@@ -212,23 +217,22 @@ for idx, node in enumerate(st.session_state["current_tree"]):
 
 # Generating next steps after selection
 if st.session_state.selected_option_changed:
-    all_selected_options = [
-        option
-        for idx in range(len(st.session_state["current_tree"]))
-        for option in st.session_state[f"selected_options_{idx}"]
-    ]
+    last_idx = len(st.session_state["current_tree"]) - 1
+    if last_idx >= 0:
+        last_selected_options = st.session_state[f"selected_options_{last_idx}"]
+        selected_options = ". ".join(last_selected_options) if last_selected_options else ""
+    else:
+        selected_options = ""
+    
+    previous_step = st.session_state["previous_steps"][-1] if st.session_state["previous_steps"] else None
 
-    if all_selected_options:
-        selected_option = " ".join(all_selected_options)  # Zbiera wszystkie zaznaczone opcje
-        previous_step = st.session_state["previous_steps"][-1] if st.session_state["previous_steps"] else None
+    summary = generate_next_steps(selected_options, previous_step)
+    new_tree = generate_decision_tree(summary)
 
-        summary = generate_next_steps(selected_option, previous_step)
-        new_tree = generate_decision_tree(summary)
-
-        st.session_state["current_tree"].append(new_tree)
-        st.session_state["tree"] = new_tree
-        st.session_state["selected_option_changed"] = False
-        st.rerun()
+    st.session_state["current_tree"].append(new_tree)
+    st.session_state["tree"] = new_tree
+    st.session_state["selected_option_changed"] = False
+    st.rerun()
 
 if st.button("Generuj Raport", use_container_width=True):      
     if st.session_state["current_tree"]:
