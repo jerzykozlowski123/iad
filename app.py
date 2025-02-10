@@ -12,8 +12,8 @@ st.set_page_config(page_title="IAD", layout="centered", menu_items={'About': 'IA
 st.title("Inteligentny Asystent Decyzyjny")
 
 class ResponseModel(BaseModel):
-    summary: str
-    options: list[str]
+    summary: str  # Krótkie podsumowanie problemu
+    options: list[str]  # Lista dwóch opcji: zachowawczej i odważnej
 
 MODEL = "gpt-4o-mini"
 session_token_limit = 25_000
@@ -42,35 +42,40 @@ def check_token_limit_for_report():
 def generate_next_steps(text, previous_step=""):
     check_token_limit()
     check_token_limit_for_report()
+    
     messages = [
         {
             'role': 'system',
             'content': f"""
             Jesteś asystentem, który pomaga podejmować decyzje. 
-            Przedstaw od 2 do 4 opcji rozwiązania problemu, jako punkty: 1. , 2. itp. 
-            W załączeniu masz opisany problem i wcześniej wybrane opcje. Użytkownik poda tobie wybraną opcję, którą rozwiń w tej odpowiedzi. 
+            Twoja odpowiedź musi zawierać:
+            1. Krótkie, jednozdaniowe podsumowanie wprowadzonego problemu.
+            2. Dwie kontrastujące opcje rozwiązania:
+               - Pierwsza opcja musi być zachowawcza, bezpieczna, minimalizująca ryzyko
+               - Druga opcja musi być odważna, akceptująca większe ryzyko dla potencjalnie większych korzyści
+               - Trzecia opcja musi być innowacyjna, nieoczywista, wręcz szalona, ale nadal prawdopodobna. Opcja ta powinna bazować na kreatywnym myśleniu i poszukiwać nietypowych, zaskakujących rozwiązań problemu.
+            Każda opcja musi zawierać uzasadnienie.
+            
+            W załączeniu masz opisany problem i wcześniej wybrane opcje. 
+            Użytkownik poda tobie wybraną opcję, którą rozwiń w tej odpowiedzi.
             Nie wracaj do poprzednich, niewybranych opcji.
-            Jeśli nie ma wcześniej wybranej opcji, to od razu przedstaw rozwiązania z uzasadnieniem.
-            Twoja odpowiedź musi rozpoczynać się krótkim podsumowaniem problemu użytkownika, a następnie zawierać porady w punktach. 
-            Nie dodawaj żadnych komentarzy ani próśb na końcu odpowiedzi.
-            Przykład odpowiedzi: 
-            Opisowe podsumowanie problemu.
-            1. Opis pierwszej porady.
-            2. Opis drugiej porady. 
             
             Poprzednia odpowiedź: {previous_step}
             """,
         },
         {"role": "user", "content": text}
     ]
+
     response = openai_client.beta.chat.completions.parse(
         model=MODEL,
         response_format=ResponseModel,
         messages=messages,
-        temperature=0,
+        temperature=0.7,
     )
+
     usage = response.usage.total_tokens
     st.session_state['total_tokens_used'] += usage
+    
     return {"content": response}
 
 @observe(name="iad-report") 
@@ -80,7 +85,7 @@ def generate_report(problem, steps, options):
         {
             'role': 'system',
             'content': f"""
-            Jesteś asystentem, który pomaga podejmować decyzje. 
+            Jesteś asystentem, który pomaga użytkownikowi podejmować decyzje. 
             Napisz raport dotyczący zdefiniowanego przez użytkownika problemu.
             Wykorzystaj w nim wszystkie podjęte kroki podczas podejmowania decyzji. 
             I rozwiń porady zawarte w ostatnich opcjach.
