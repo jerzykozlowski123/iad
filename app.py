@@ -199,6 +199,9 @@ Powstanie aplikacja dostosowana do Twoich procesów, specyficznych potrzeb i sł
 mogłaby znacząco usprawnić codzienne operacje, przyspieszyć analizę danych i podnieść jakość podejmowanych decyzji. 
             """)
     
+    st.link_button("Polityka prywatności", "https://jurek.fra1.digitaloceanspaces.com/polityka_prywatnosci_iad.pdf")
+    st.link_button("Regulamin", "https://jurek.fra1.digitaloceanspaces.com/regulamin_iad.pdf")
+
     buy_me_a_coffee_button = """ <script type="text/javascript" src="https://cdnjs.buymeacoffee.com/1.0.0/button.prod.min.js" data-name="bmc-button" data-slug="jerzykozlowski" data-color="#FFDD00" data-emoji="☕" data-font="Cookie" data-text="Buy me a coffee" data-outline-color="#000000" data-font-color="#000000" data-coffee-color="#ffffff"></script> """
     components.html(buy_me_a_coffee_button, height=70)
 
