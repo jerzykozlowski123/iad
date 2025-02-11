@@ -3,3 +3,8 @@ python-dotenv
 langfuse
 openai
 pydantic
+PyPDF2
+python-docx
+requests
+beautifulsoup4
+googlesearch-python

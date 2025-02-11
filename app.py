@@ -6,7 +6,11 @@ from pydantic import BaseModel
 import streamlit.components.v1 as components
 import os
 import time
-
+from PyPDF2 import PdfReader
+from docx import Document
+import requests
+from bs4 import BeautifulSoup
+from googlesearch import search
 
 st.set_page_config(page_title="IAD", layout="centered", menu_items={'About': 'IAD by JK'})
 st.title("Inteligentny Asystent Decyzyjny")
@@ -21,6 +25,27 @@ session_token_limit_and_report = 27_000
 
 load_dotenv()
 openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+# Funkcja do wydobywania tekstu z PDF
+def extract_text_from_pdf(pdf_file):
+    reader = PdfReader(pdf_file)
+    text = ''
+    for page in reader.pages:
+        text += page.extract_text()
+    return text
+
+# Funkcja do wydobywania tekstu z DOCX
+def extract_text_from_docx(docx_file):
+    doc = Document(docx_file)
+    text = ''
+    for para in doc.paragraphs:
+        text += para.text + '\n'
+    return text
+
+# Funkcja do wydobywania tekstu z TXT
+def extract_text_from_txt(txt_file):
+    text = txt_file.getvalue().decode("utf-8")
+    return text
 
 def check_token_limit():
     if st.session_state['total_tokens_used'] >= session_token_limit:
@@ -38,8 +63,23 @@ def check_token_limit_for_report():
         st.error("Limit tokenów został osiągnięty. Aplikacja została zatrzymana.")
         st.stop()
 
+# Funkcja do generowania streszczenia za pomocą GPT
+@observe(name="iad-doc-summary") 
+def generate_summary(text):
+    response = openai_client.chat.completions.create(
+        model=MODEL,
+        messages=[  # Musi być lista słowników
+            {"role": "system", "content": "Stwórz krótkie streszczenie poniższego tekstu:"},
+            {"role": "user", "content": text}
+        ],
+        max_tokens=400  # Ograniczenie długości odpowiedzi
+    )
+    usage = response.usage.total_tokens
+    st.session_state['total_tokens_used'] += usage
+    return response.choices[0].message.content
+
 @observe(name="iad-steps") 
-def generate_next_steps(text, previous_step=""):
+def generate_next_steps(text, document_summary="", web_summaries="", previous_step=""):
     check_token_limit()
     check_token_limit_for_report()
     
@@ -59,8 +99,11 @@ def generate_next_steps(text, previous_step=""):
             W załączeniu masz opisany problem i wcześniej wybrane opcje. 
             Użytkownik poda tobie wybraną opcję, którą rozwiń w tej odpowiedzi.
             Nie wracaj do poprzednich, niewybranych opcji.
+            W odpowiedzi możesz wykorzystać informacje z dołączonych Dodatkowych informacji i aktualnych danych z internetu.
             
-            Poprzednia odpowiedź: {previous_step}
+            Poprzednia odpowiedź: {previous_step} 
+            Dodatkowe informacje: {document_summary}
+            Najnowsze dane z internetu: {web_summaries}
             """,
         },
         {"role": "user", "content": text}
@@ -109,6 +152,30 @@ Ostatnie opcje: {options}
     st.session_state['total_tokens_used'] += usage
     return {"content": response}
 
+# Funkcja do wyszukiwania stron internetowych na podstawie zapytania
+def search_web(query):
+    results = []
+    for url in search(query, num_results=2):  # Pobieramy 2 wyniki
+        try:
+            page = requests.get(url)
+            soup = BeautifulSoup(page.content, 'html.parser')
+            # Pobieramy pełny tekst strony
+            paragraphs = soup.find_all('p')
+            page_text = '\n'.join([para.get_text() for para in paragraphs])
+            results.append(page_text)
+        except Exception as e:
+            print(f"Nie udało się pobrać strony: {url}, błąd: {e}")
+    return results
+
+# Funkcja do analizy tematycznej pytania
+def is_question_relevant_to_document(question, document_text):
+    # Tu możesz dodać bardziej zaawansowaną analizę semantyczną, np. poprzez obliczenie podobieństwa wektorowego
+    # Na razie będziemy po prostu sprawdzać, czy pytanie zawiera jakieś słowa kluczowe z dokumentu
+    document_keywords = set(document_text.split())
+    question_keywords = set(question.split())
+    common_keywords = document_keywords.intersection(question_keywords)
+    return len(common_keywords) > 0
+
 # Funkcja do generowania drzewa decyzyjnego
 def generate_decision_tree(answer):
     if answer['content'] is None:
@@ -123,10 +190,12 @@ with st.sidebar:
     with c2:
         st.image("./pictures/logo_aidd_150.png")
     st.title("Inteligentny Asystent Decyzyjny")
-    st.write("""
+    st.markdown("""
 Aplikacja to prototyp wykorzystujący sztuczną inteligencję do generowania raportów w oparciu o dane wejściowe. 
-Wyobraź sobie, że przełączymy ją na najnowszy model, a dodatkowo przeszkolony na szczegółowych danych z Twojej branży. 
-Aplikacja dostosowana do Twoich procesów, specyficznych potrzeb i słownictwa, 
+
+Wyobraź sobie, że przełączymy ją na najnowszy model, a dodatkowo przeszkolimy na szczegółowych danych z Twojej branży. 
+
+Powstanie aplikacja dostosowana do Twoich procesów, specyficznych potrzeb i słownictwa, która
 mogłaby znacząco usprawnić codzienne operacje, przyspieszyć analizę danych i podnieść jakość podejmowanych decyzji. 
             """)
     
@@ -162,7 +231,27 @@ mogłaby znacząco usprawnić codzienne operacje, przyspieszyć analizę danych 
 #
 # Main
 #
-text_entry = st.text_area("Wprowadź opis sytuacji:", "", max_chars=250)
+st.markdown("#### Możesz załadować dokument dotyczący problemu o który chcesz zapytać.")
+# Upload dokumentu
+uploaded_file = st.file_uploader("Wybierz plik PDF, DOCX lub TXT", type=["pdf", "docx", "txt"], )
+# Jeśli plik został przesłany
+document_text = ''
+if uploaded_file is not None:
+    # Sprawdzamy typ pliku
+    if uploaded_file.type == "application/pdf":
+        with st.status("Przetwarzam dokument PDF..."):
+            document_text = extract_text_from_pdf(uploaded_file)
+    elif uploaded_file.type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+        with st.status("Przetwarzam dokument DOCX..."):
+            document_text = extract_text_from_docx(uploaded_file)
+    elif uploaded_file.type == "text/plain":
+        with st.status("Przetwarzam dokument TXT..."):
+            document_text = extract_text_from_txt(uploaded_file)
+
+    
+
+st.markdown("### Wprowadź opis sytuacji:")
+text_entry = st.text_area(" ", "", max_chars=250)
 
 if 'total_tokens_used' not in st.session_state:
     st.session_state['total_tokens_used'] = 0
@@ -181,8 +270,18 @@ if "buttons_status" not in st.session_state:
 
 if st.button("Generuj Poradę", use_container_width=True, disabled=st.session_state["buttons_status"]):
     if text_entry.strip():
-        summary = generate_next_steps(text_entry)
-        tree = generate_decision_tree(summary)
+        
+        # if is_question_relevant_to_document(text_entry, document_text):
+        with st.status("Przeszukuję internet aby sprawdzić najnowsze informacje na ten temat..."):
+            web_content = search_web(text_entry)
+        with st.status("Przetwarzam znalezione artykuły..."):
+            web_summaries = [generate_summary(page) for page in web_content]
+        with st.status("Analizuję twój dokument..."):
+            # Streszczenie dokumentu
+            document_summary = generate_summary(document_text)
+        with st.status("Muszę się zastanowić..."):
+            summary = generate_next_steps(text_entry, document_summary, web_summaries)
+            tree = generate_decision_tree(summary)
         st.session_state["current_tree"].append(tree)
         st.session_state["tree"] = tree 
         # Reset selected options to ensure checkboxes are not pre-selected
@@ -258,4 +357,7 @@ if st.button("Resetuj Porady"):
     st.session_state["tree"] = None
     st.session_state["previous_steps"] = []
     st.session_state.selected_option_changed = False
+    document_text = ""
+    st.session_state.clear()
+
     st.rerun()
